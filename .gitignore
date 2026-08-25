@@ -1,0 +1,20 @@
+# Build outputs
+obj/
+bin/*.elf
+bin/*.irx
+*.o
+*.d
+*.vsm
+*.a
+*.elf
+
+# Keep directory placeholders
+!bin/.gitkeep
+!obj/.gitkeep
+!res/.gitkeep
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
