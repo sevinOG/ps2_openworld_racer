@@ -1,0 +1,123 @@
+diff --git a/Makefile.base b/Makefile.base
+index 653ac9a..099c8db 100644
+--- a/Makefile.base
++++ b/Makefile.base
+@@ -85,10 +85,9 @@ $(BUILDDIR)/%.$(OBJEXT): $(SRCDIR)/%.$(IRXEMBEDDEDEXT)
+ $(BUILDDIR)/%.$(OBJEXT): $(SRCDIR)/%.$(SRCEXT)
+ 	@mkdir -p $(dir $@)
+ 	$(CXX) $(CFLAGS) $(INC) -c -o $@ $<
+-	@$(CXX) $(CFLAGS) $(INCDEP) -MM $(SRCDIR)/$*.$(SRCEXT) > $(BUILDDIR)/$*.$(DEPEXT)
+-	@cp -f $(BUILDDIR)/$*.$(DEPEXT) $(BUILDDIR)/$*.$(DEPEXT).tmp
++	@$(CXX) $(CFLAGS) $(INCDEP) -MM $(SRCDIR)/$*.$(SRCEXT) > $(BUILDDIR)/$*.$(DEPEXT).tmp
+ 	@sed -e 's|.*:|$(BUILDDIR)/$*.$(OBJEXT):|' < $(BUILDDIR)/$*.$(DEPEXT).tmp > $(BUILDDIR)/$*.$(DEPEXT)
+-	@sed -e 's/.*://' -e 's/\\$$//' < $(BUILDDIR)/$*.$(DEPEXT).tmp | fmt -1 | sed -e 's/^ *//' -e 's/$$/:/' >> $(BUILDDIR)/$*.$(DEPEXT)
++	@sed -e 's/.*://' -e 's/\\$$//' < $(BUILDDIR)/$*.$(DEPEXT).tmp | sed -e 's/^ *//' -e 's/$$/:/' >> $(BUILDDIR)/$*.$(DEPEXT)
+ 	@rm -f $(BUILDDIR)/$*.$(DEPEXT).tmp
+ 
+ $(BUILDDIR)/%.$(OBJEXT): $(SRCDIR)/%.$(VCLEXT)
+diff --git a/engine/inc/renderer/3d/renderer_3d_utility.hpp b/engine/inc/renderer/3d/renderer_3d_utility.hpp
+index 4d48171..e67b51a 100644
+--- a/engine/inc/renderer/3d/renderer_3d_utility.hpp
++++ b/engine/inc/renderer/3d/renderer_3d_utility.hpp
+@@ -37,6 +37,10 @@ class Renderer3DUtility {
+   void drawLine(const Vec4& from, const Vec4& to);
+   void drawLine(const Vec4& from, const Vec4& to, const Color& color);
+ 
++  // Many lines, one GS sync. drawLine() syncs the GIF channel per segment.
++  void pushLine(const Vec4& from, const Vec4& to, const Color& color);
++  void flushLines();
++
+   void drawBBox(const CoreBBox& v);
+   void drawBBox(const CoreBBox& v, const Color& color);
+ 
+@@ -44,6 +48,15 @@ class Renderer3DUtility {
+   std::array<PlanesClipVertex, 9> clippedVerts;
+   std::array<PlanesClipVertexPtrs, 3> clipInput;
+ 
++  struct BatchedLine {
++    Vec4 from;
++    Vec4 to;
++    Color color;
++  };
++  static const int kLineBatchMax = 32;
++  BatchedLine lineBatch[kLineBatchMax];
++  int lineBatchCount;
++
+   RendererCore* core;
+   prim_t prim;
+ 
+diff --git a/engine/src/renderer/3d/renderer_3d_utility.cpp b/engine/src/renderer/3d/renderer_3d_utility.cpp
+index 62a90d9..7bd9d0d 100644
+--- a/engine/src/renderer/3d/renderer_3d_utility.cpp
++++ b/engine/src/renderer/3d/renderer_3d_utility.cpp
+@@ -19,7 +19,7 @@
+ 
+ namespace Tyra {
+ 
+-Renderer3DUtility::Renderer3DUtility() {}
++Renderer3DUtility::Renderer3DUtility() : lineBatchCount(0) {}
+ 
+ Renderer3DUtility::~Renderer3DUtility() {}
+ 
+@@ -111,6 +111,61 @@ void Renderer3DUtility::drawLine(const Vec4& from, const Vec4& to,
+   packet2_free(packet);
+ }
+ 
++void Renderer3DUtility::pushLine(const Vec4& from, const Vec4& to,
++                                 const Color& color) {
++  lineBatch[lineBatchCount].from = from;
++  lineBatch[lineBatchCount].to = to;
++  lineBatch[lineBatchCount].color = color;
++  lineBatchCount++;
++  if (lineBatchCount >= kLineBatchMax) flushLines();
++}
++
++void Renderer3DUtility::flushLines() {
++  if (lineBatchCount <= 0) return;
++
++  const s8 thickness = 2;
++  const int count = lineBatchCount;
++  const s16 packetSize = static_cast<s16>(24 * thickness * count);
++  auto* packet =
++      packet2_create(packetSize, P2_TYPE_NORMAL, P2_MODE_CHAIN, false);
++
++  packet2_chain_open_end(packet, 0, 0);
++  bool drew = false;
++
++  for (s8 pass = 0; pass < thickness; pass++) {
++    Vec4 scale(2048.0F + pass, 2048.0F + pass,
++               static_cast<float>(0xFFFFFF) / 32.0F, 1.0F);
++    for (int i = 0; i < count; i++) {
++      std::array<xyz_t, 2> outputVerts;
++      if (!calcLineVertices(outputVerts.data(), lineBatch[i].from,
++                            lineBatch[i].to, scale)) {
++        continue;
++      }
++      drew = true;
++      auto gsColor = getGSColor(lineBatch[i].color);
++      packet2_update(packet, draw_prim_start(packet->next, 0, &prim, &gsColor));
++      packet2_add_u64(packet, outputVerts[0].xyz);
++      packet2_add_u64(packet, outputVerts[1].xyz);
++      packet2_update(packet,
++                     draw_prim_end(packet->next, 2, TYRA_UTILS_LINE_REGLIST));
++      packet2_pad128(packet, 0);
++    }
++  }
++
++  lineBatchCount = 0;
++  if (!drew) {
++    packet2_free(packet);
++    return;
++  }
++
++  packet2_update(packet, draw_finish(packet->next));
++  packet2_chain_close_tag(packet);
++  dma_channel_wait(DMA_CHANNEL_GIF, 0);
++  dma_channel_send_packet2(packet, DMA_CHANNEL_GIF, true);
++  dma_channel_wait(DMA_CHANNEL_GIF, 0);
++  packet2_free(packet);
++}
++
+ void Renderer3DUtility::drawBBox(const CoreBBox& v, const Color& color) {
+   const u8 stripsCount = 6;
+   const u8 vertCount = 4;

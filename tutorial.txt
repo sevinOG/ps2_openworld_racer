@@ -1,0 +1,136 @@
+PS2 Open-World Racer — how to use this with Grok / agents
+=========================================================
+
+Where things live
+-----------------
+Linux project (ALWAYS work here):
+  /home/sevin/projects/ps2-openworld-racer
+
+Windows Explorer:
+  \\wsl$\Ubuntu\home\sevin\projects\ps2-openworld-racer
+
+Windows launchers (use these from CMD/PowerShell, any folder):
+  C:\Users\ananb\ps2-racer\build.cmd
+  C:\Users\ananb\ps2-racer\clean.cmd
+  C:\Users\ananb\ps2-racer\fix-perms.cmd
+  C:\Users\ananb\ps2-racer\run-pcsx2.cmd
+  C:\Users\ananb\ps2-racer\wsl-shell.cmd
+
+PCSX2:
+  C:\Program Files\PCSX2\pcsx2-qt.exe
+  Games/HostFS folder:
+  C:\Users\ananb\Documents\PCSX2\games\racer.elf
+
+
+The only build command
+----------------------
+From PowerShell or CMD (cwd does not matter):
+
+  C:\Users\ananb\ps2-racer\build.cmd
+
+From a WSL Ubuntu shell:
+
+  cd /home/sevin/projects/ps2-openworld-racer
+  ./scripts/build.sh
+
+Equivalent one-liner from Windows:
+
+  wsl -d Ubuntu -- bash -lc "cd /home/sevin/projects/ps2-openworld-racer && ./scripts/build.sh"
+
+That script:
+  - starts Docker inside WSL if needed
+  - runs `make` in the h4570/tyra container AS user sevin (uid 1000)
+  - so bin/ and obj/ are never owned by root
+  - copies racer.elf + res/ to the PCSX2 games folder
+
+Run in PCSX2:
+
+  C:\Users\ananb\ps2-racer\run-pcsx2.cmd
+
+  or:  ./scripts/run-pcsx2.sh
+
+
+Rules for you (human) and for agents
+------------------------------------
+1. Docker lives INSIDE WSL. There is no `docker` on Windows PATH.
+   Never run `docker ...` from CMD/PowerShell.
+
+2. Never run `make` on the Windows host or in a bare WSL shell.
+   The EE compiler (`mips64r5900el-ps2-elf-g++`) is only inside the
+   h4570/tyra container. Host `make` dies with "No such file or directory".
+
+3. Never `sudo`. It waits for a password and the agent times out.
+   If bin/obj are owned by root, run:
+     C:\Users\ananb\ps2-racer\fix-perms.cmd
+   or: ./scripts/fix-perms.sh
+   That chowns via `docker run --user 0`, not host sudo.
+
+4. Never use UNC as a CMD working directory.
+   `\\wsl.localhost\Ubuntu\...` makes CMD print:
+     "UNC paths are not supported. Defaulting to Windows directory."
+   Then every relative command runs in C:\Windows and docker/make are missing.
+
+5. Never `cd C:\home\sevin\...` — that path does not exist.
+   The Linux path is /home/sevin/projects/ps2-openworld-racer
+
+6. After `wsl --shutdown`, Docker is down until Ubuntu starts again.
+   build.cmd runs `service docker start` as root first.
+
+
+How to talk to Grok / other agents
+----------------------------------
+Paste this (or point them at this file):
+
+  Project is a PS2 homebrew game in WSL, not a Windows repo.
+  Linux path: /home/sevin/projects/ps2-openworld-racer
+  Build ONLY with:
+    wsl -d Ubuntu -- bash -lc "cd /home/sevin/projects/ps2-openworld-racer && ./scripts/build.sh"
+  or from Windows: C:\Users\ananb\ps2-racer\build.cmd
+  Do not run docker or make from Windows. Do not sudo.
+  If permission denied on bin/obj: ./scripts/fix-perms.sh
+  Target is real PS2 (Tyra engine, mips64r5900el-ps2-elf-g++). No SDL/OpenGL.
+
+If the agent is Cursor/Claude/etc. with the folder opened via
+\\wsl.localhost\Ubuntu\..., tell it:
+
+  Your shell is Windows CMD on a UNC path. Ignore cwd.
+  Prefix every command with:
+    wsl -d Ubuntu -- bash -lc "cd /home/sevin/projects/ps2-openworld-racer && <linux command>"
+  For builds, only call ./scripts/build.sh (that wrapper already runs Docker).
+
+
+Common failures
+---------------
+  'docker' is not recognized
+      You ran docker on Windows. Use build.cmd / build.sh.
+
+  make: mips64r5900el-ps2-elf-g++: No such file or directory
+      You ran make on the host. Use ./scripts/build.sh.
+
+  Permission denied on bin/*.obj or obj/*.o
+      Old Docker run as root. ./scripts/fix-perms.sh then rebuild.
+      Do NOT sudo chown.
+
+  sudo timed out after 60s
+      Agent hit a password prompt. Use fix-perms.sh.
+
+  UNC paths are not supported
+      CMD cwd was \\wsl.localhost\... Use the wsl -d Ubuntu one-liner
+      or C:\Users\ananb\ps2-racer\*.cmd
+
+  No rule to make target 'build-engine'
+      make ran in the wrong directory (often C:\Windows after UNC).
+      Use the one-liner that cds to the Linux project first.
+
+
+Layout
+------
+  src/ inc/ res/     game code and assets
+  scripts/build.sh   the real build
+  scripts/clean.sh
+  scripts/fix-perms.sh   chown bin/ and obj/ if an old root build owns them
+  scripts/run-pcsx2.sh
+  patches/           small fixes applied onto vendor/tyra
+  vendor/tyra/       engine submodule
+  bin/racer.elf      output
+  tutorial.txt       this file

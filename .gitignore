@@ -13,6 +13,15 @@ bin/*.irx
 !obj/.gitkeep
 !res/.gitkeep
 
+# A ps2dev install prefix was pointed at this repo once. The SDK lives in ~/ps2dev.
+/dvp/
+/ee/
+/gsKit/
+/iop/
+/ps2sdk/
+/share/
+/.ps2dev-installer/
+
 # Editor / OS
 .DS_Store
 Thumbs.db

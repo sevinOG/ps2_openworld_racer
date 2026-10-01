@@ -1,5 +1,5 @@
-# PS2 Open-World Racer
-# Built with Tyra + ps2dev. Run via ./scripts/build.sh (Docker).
+# PS2 Open-World Racer — Grok starter
+# Compile with ./scripts/build.sh (Docker + h4570/tyra)
 
 TARGET      := racer.elf
 ENGINEDIR   := vendor/tyra/engine
@@ -16,7 +16,7 @@ VCLPPEXT    := vclpp
 DEPEXT      := d
 OBJEXT      := o
 
-CFLAGS      :=
+CFLAGS      := -D_EE -Wall -O3
 LIB         := -ltyra
 LIBDIRS     := -L$(ENGINEDIR)/bin
 INC         := -I$(INCDIR) -I$(ENGINEDIR)/inc
@@ -29,6 +29,3 @@ clean-engine:
 
 build-engine:
 	cd $(ENGINEDIR) && $(MAKE)
-
-build-release-engine:
-	cd $(ENGINEDIR) && $(MAKE) release
